@@ -1,0 +1,188 @@
+// This is your Prisma schema file
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Model User untuk authentication
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      Role     @default(VIEWER)
+  opdId     String?  @map("opd_id")
+  opd       Opd?     @relation(fields: [opdId], references: [id])
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  auditLogs AuditLog[]
+
+  @@map("users")
+}
+
+enum Role {
+  ADMIN
+  OPD
+  VIEWER
+}
+
+// Model Organisasi Perangkat Daerah
+model Opd {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  kepala    String?
+  contact   String?
+  address   String?
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  users  User[]
+  pakets Paket[]
+
+  @@map("opd")
+}
+
+// Model Paket Pekerjaan
+model Paket {
+  id          String         @id @default(uuid())
+  code        String         @unique
+  name        String
+  kategori    KategoriPaket
+  opdId       String         @map("opd_id")
+  opd         Opd            @relation(fields: [opdId], references: [id])
+  kegiatan    String
+  lokasi      String
+  nilai       Float
+  pagu        Float          @default(0) // Pagu Anggaran
+  nilaiRealisasi Float       @default(0) @map("nilai_realisasi")
+  progres     Float          @default(0) // dalam persen
+  tahun       Int
+  status      StatusPaket    @default(PENDING)
+  tanggalMulai DateTime?     @map("tanggal_mulai")
+  tanggalSelesai DateTime?   @map("tanggal_selesai")
+  keterangan  String?
+  nomorKontrak String?       @map("nomor_kontrak")
+  noSPMK      String?        @map("no_spmk")
+  sumberDana  String?        @default("BLUD") @map("sumber_dana")
+  pelaksana   String?
+  kodeRekening String?       @map("kode_rekening")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  progress    PaketProgress[]
+  documents   Document[]
+
+  @@index([opdId])
+  @@index([kategori])
+  @@index([tahun])
+  @@index([status])
+  @@map("paket")
+}
+
+enum KategoriPaket {
+  KONSTRUKSI
+  KONSULTANSI
+  BARANG
+  JASA_LAINNYA
+}
+
+enum StatusPaket {
+  PENDING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+// Model Progress Paket (Update berkala)
+model PaketProgress {
+  id              String   @id @default(uuid())
+  paketId         String   @map("paket_id")
+  paket           Paket    @relation(fields: [paketId], references: [id], onDelete: Cascade)
+  progres         Float    // persen
+  nilaiRealisasi  Float    @map("nilai_realisasi")
+  keterangan      String?
+  tanggal         DateTime @default(now())
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([paketId])
+  @@map("paket_progress")
+}
+
+// Model Dokumen
+model Document {
+  id        String   @id @default(uuid())
+  paketId   String   @map("paket_id")
+  paket     Paket    @relation(fields: [paketId], references: [id], onDelete: Cascade)
+  name      String
+  filename  String
+  filepath  String
+  filesize  Int
+  mimetype  String
+  category  String?  // 'progress-0', 'progress-50', 'progress-100', 'document'
+  progressPercentage Int? @map("progress_percentage") // 0, 50, 100, etc
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([paketId])
+  @@index([category])
+  @@map("documents")
+}
+
+// Model Audit Log
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String?  @map("entity_id")
+  details   String?  // JSON string
+  ipAddress String?  @map("ip_address")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([entity])
+  @@map("audit_logs")
+}
+
+// Model Fisik (Physical Development/Construction Projects)
+model Fisik {
+  id             Int       @id @default(autoincrement())
+  jasa           String    @db.VarChar(15) // Konstruksi, Konsultasi
+  thAnggaran     String    @map("th_anggaran") @db.VarChar(4)
+  skpd           String    @db.VarChar(125)
+  kegiatan       String    @db.VarChar(255)
+  lokasi         String    @db.VarChar(125)
+  noKontrak      String    @map("no_kontrak") @db.VarChar(40)
+  tglKontrak     DateTime  @map("tgl_kontrak") @db.Date
+  nilaiKontrak   String    @map("nilai_kontrak") @db.VarChar(20)
+  noSpnk         String    @map("no_spnk") @db.VarChar(35)
+  tglSpnk        DateTime  @map("tgl_spnk") @db.Date
+  nilaiSpnk      DateTime  @map("nilai_spnk") @db.Date
+  pagu           String    @db.VarChar(20)
+  hps            String    @db.VarChar(20)
+  pelaksana      String    @db.VarChar(125)
+  rencana        String    @db.VarChar(10)
+  realisasi      String    @db.VarChar(50)
+  deviasi        String    @db.VarChar(10)
+  foto1          String    @default("") @db.VarChar(70)
+  foto2          String    @default("") @db.VarChar(70)
+  foto3          String    @default("") @db.VarChar(70)
+  foto4          String    @default("") @db.VarChar(70)
+  tglUpdate      DateTime  @map("tgl_update") @db.Date
+  prosentase     String    @db.VarChar(3)
+
+  @@index([thAnggaran])
+  @@index([skpd])
+  @@index([jasa])
+  @@map("fisik")
+}
