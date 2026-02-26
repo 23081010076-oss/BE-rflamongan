@@ -37,7 +37,7 @@ export const createUser = async (
 ) => {
   const hashed = await bcrypt.hash(password, 10);
   const user = await prisma.user.create({
-    data: { email, password: hashed, name, role, opdId },
+    data: { email, password: hashed, name, role, opdId: opdId || null },
     include: { opd: true },
   });
 
@@ -56,6 +56,11 @@ export const createUser = async (
 export const updateUser = async (id, { password, ...data }, actorId) => {
   if (password) {
     data.password = await bcrypt.hash(password, 10);
+  }
+
+  // Convert empty string opdId to null
+  if (data.opdId === "" || data.opdId === undefined) {
+    data.opdId = null;
   }
 
   const user = await prisma.user.update({
