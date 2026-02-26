@@ -356,7 +356,7 @@ export const uploadDocuments = async (
           paketId: id,
           name: file.originalname,
           filename: file.filename,
-          filepath: `/uploads/${file.filename}`,
+          filepath: file.path,
           mimetype: file.mimetype,
           filesize: file.size,
           category: category || null,
