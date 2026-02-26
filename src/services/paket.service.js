@@ -1,11 +1,22 @@
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import { v2 as cloudinary } from "cloudinary";
 import prisma from "./prisma.js";
 import { log } from "./audit.service.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// Upload buffer to Cloudinary
+const uploadToCloudinary = (buffer, originalname) =>
+  new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder: "erp-lamongan", resource_type: "image" },
+      (error, result) => (error ? reject(error) : resolve(result)),
+    );
+    stream.end(buffer);
+  });
 
 const VALID_STATUSES = ["PENDING", "ACTIVE", "COMPLETED", "CANCELLED"];
 
@@ -350,13 +361,14 @@ export const uploadDocuments = async (
   }
 
   const documents = await Promise.all(
-    files.map((file) =>
-      prisma.document.create({
+    files.map(async (file) => {
+      const result = await uploadToCloudinary(file.buffer, file.originalname);
+      return prisma.document.create({
         data: {
           paketId: id,
           name: file.originalname,
-          filename: file.filename,
-          filepath: file.path,
+          filename: result.public_id,
+          filepath: result.secure_url,
           mimetype: file.mimetype,
           filesize: file.size,
           category: category || null,
@@ -364,8 +376,8 @@ export const uploadDocuments = async (
             ? parseInt(progressPercentage)
             : null,
         },
-      }),
-    ),
+      });
+    }),
   );
 
   await log({
