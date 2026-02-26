@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: be-rflamongan
+    runtime: node
+    buildCommand: npm install && npx prisma generate
+    startCommand: npx prisma migrate deploy && node src/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
