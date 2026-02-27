@@ -122,6 +122,13 @@ const parseSectionHeader = (name) => {
   return false;
 };
 
+// Detect total/subtotal summary rows that should never be imported
+const isTotalRow = (name) => {
+  if (!name) return false;
+  const n = norm(name);
+  return /^(JUMLAH|TOTAL|SUB TOTAL|SUBTOTAL|GRAND TOTAL|JUMLAH TOTAL|REKAPITULASI|REKAP)(\s|$)/.test(n);
+};
+
 const VALID_MAP = {
   KONSTRUKSI: "KONSTRUKSI", KONSTRUSI: "KONSTRUKSI",
   KONSULTANSI: "KONSULTANSI", KONSULTAN: "KONSULTANSI",
@@ -230,6 +237,9 @@ export const importFromBuffer = async (buffer, actorId, defaults = {}) => {
         currentSection = section;
         continue;
       }
+
+      // Skip total/subtotal summary rows
+      if (isTotalRow(rawName)) continue;
 
       // Skip fully blank rows
       if (!rawName) continue;
