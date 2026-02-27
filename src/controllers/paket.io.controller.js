@@ -53,9 +53,17 @@ export const importPaket = async (req, res, next) => {
     if (!req.file)
       return res.status(400).json({ error: "File Excel tidak ditemukan" });
 
+    const { tahun, opdId, sumberDana } = req.body;
+    const defaults = {
+      tahun: tahun || null,
+      opdId: opdId || null,
+      sumberDana: sumberDana || null,
+    };
+
     const result = await importService.importFromBuffer(
       req.file.buffer,
       req.user.id,
+      defaults,
     );
 
     res.json({

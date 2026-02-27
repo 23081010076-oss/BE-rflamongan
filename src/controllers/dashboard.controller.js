@@ -32,3 +32,12 @@ export const getRecentUpdates = async (req, res, next) => {
     handleError(error, res, next);
   }
 };
+
+export const getRekap = async (req, res, next) => {
+  try {
+    const result = await dashboardService.getRekapData(req.query.tahun);
+    res.json(result);
+  } catch (error) {
+    handleError(error, res, next);
+  }
+};

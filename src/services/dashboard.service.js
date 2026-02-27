@@ -136,3 +136,68 @@ export const getRecentUpdates = async (limit = 10) => {
     include: { opd: { select: { name: true, code: true } } },
   });
 };
+
+export const getRekapData = async (tahun) => {
+  const currentYear = tahun ? parseInt(tahun) : new Date().getFullYear();
+
+  const data = await prisma.paket.groupBy({
+    by: ["opdId"],
+    where: { tahun: currentYear },
+    _count: true,
+    _sum: { pagu: true, nilai: true, nilaiRealisasi: true },
+    _avg: { progres: true },
+  });
+
+  const opdIds = data.map((d) => d.opdId).filter(Boolean);
+  const opds = await prisma.opd.findMany({
+    where: { id: { in: opdIds } },
+    select: { id: true, name: true, code: true },
+  });
+  const opdMap = opds.reduce((acc, o) => {
+    acc[o.id] = o;
+    return acc;
+  }, {});
+
+  const rows = data
+    .filter((d) => d.opdId)
+    .map((d) => ({
+      opd: opdMap[d.opdId],
+      jumlahKegiatan: d._count,
+      paguAnggaran: d._sum.pagu || 0,
+      nilaiKontrak: d._sum.nilai || 0,
+      realisasiKeuangan: d._sum.nilaiRealisasi || 0,
+      realisasiFisik: parseFloat((d._avg.progres || 0).toFixed(2)),
+      pctKeuangan:
+        d._sum.nilai > 0
+          ? parseFloat(
+              ((d._sum.nilaiRealisasi / d._sum.nilai) * 100).toFixed(2),
+            )
+          : 0,
+    }))
+    .sort((a, b) => b.nilaiKontrak - a.nilaiKontrak);
+
+  const totals = rows.reduce(
+    (acc, r) => {
+      acc.jumlahKegiatan += r.jumlahKegiatan;
+      acc.paguAnggaran += r.paguAnggaran;
+      acc.nilaiKontrak += r.nilaiKontrak;
+      acc.realisasiKeuangan += r.realisasiKeuangan;
+      return acc;
+    },
+    { jumlahKegiatan: 0, paguAnggaran: 0, nilaiKontrak: 0, realisasiKeuangan: 0 },
+  );
+  totals.realisasiFisik =
+    rows.length > 0
+      ? parseFloat(
+          (rows.reduce((s, r) => s + r.realisasiFisik, 0) / rows.length).toFixed(2),
+        )
+      : 0;
+  totals.pctKeuangan =
+    totals.nilaiKontrak > 0
+      ? parseFloat(
+          ((totals.realisasiKeuangan / totals.nilaiKontrak) * 100).toFixed(2),
+        )
+      : 0;
+
+  return { tahun: currentYear, rows, totals };
+};

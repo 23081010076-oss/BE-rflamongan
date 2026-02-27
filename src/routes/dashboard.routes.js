@@ -3,6 +3,7 @@ import {
   getStats,
   getChartData,
   getRecentUpdates,
+  getRekap,
 } from "../controllers/dashboard.controller.js";
 import { authenticate } from "../middleware/auth.js";
 
@@ -13,5 +14,6 @@ router.use(authenticate);
 router.get("/stats", getStats);
 router.get("/chart", getChartData);
 router.get("/recent", getRecentUpdates);
+router.get("/rekap", getRekap);
 
 export default router;

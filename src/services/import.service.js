@@ -4,7 +4,7 @@ import { log } from "./audit.service.js";
 
 const VALID_KATEGORI = ["KONSTRUKSI", "KONSULTANSI", "BARANG", "JASA_LAINNYA"];
 
-export const importFromBuffer = async (buffer, actorId) => {
+export const importFromBuffer = async (buffer, actorId, defaults = {}) => {
   const wb = XLSX.read(buffer, { type: "buffer" });
   const ws = wb.Sheets[wb.SheetNames[0]];
 
@@ -79,13 +79,13 @@ export const importFromBuffer = async (buffer, actorId) => {
       const pelaksana =
         String(row["PELAKSANA"] || row.pelaksana || "").trim() || null;
       const sumberDana = String(
-        row["SUMBER DANA"] || row["SUMBER_DANA"] || row.sumber_dana || "APBD",
+        row["SUMBER DANA"] || row["SUMBER_DANA"] || row.sumber_dana || defaults.sumberDana || "APBD",
       ).trim();
       const lokasi = String(row["LOKASI"] || row.lokasi || "").trim();
       const keterangan =
         String(row["KET"] || row.keterangan || "").trim() || null;
       const tahun =
-        parseInt(row["TAHUN"] || row.tahun) || new Date().getFullYear();
+        parseInt(row["TAHUN"] || row.tahun) || parseInt(defaults.tahun) || new Date().getFullYear();
       const progres =
         parseFloat(
           row["PROGRES FISIK"] || row["PROGRES_FISIK"] || row.progres || 0,
@@ -122,7 +122,8 @@ export const importFromBuffer = async (buffer, actorId) => {
         results.failed++;
         continue;
       }
-      if (!opdMap[opdCode]) {
+      const resolvedOpdId = opdMap[opdCode] || defaults.opdId || null;
+      if (!resolvedOpdId) {
         results.errors.push(
           `Baris ${rowNum}: OPD tidak ditemukan (${opdCode})`,
         );
@@ -148,7 +149,7 @@ export const importFromBuffer = async (buffer, actorId) => {
         kegiatan: kegiatan || "-",
         kodeRekening: kodeRekening || null,
         kategori,
-        opdId: opdMap[opdCode],
+        opdId: resolvedOpdId,
         pagu,
         nilai,
         nilaiRealisasi,
