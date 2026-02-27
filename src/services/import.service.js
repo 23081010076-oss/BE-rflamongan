@@ -51,12 +51,45 @@ const buildHeaderMap = (row) => {
 const detectHeaderRow = (ws) => {
   const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
   const KEYWORDS = ["PAKET PEKERJAAN","NAMA PEKERJAAN","PEKERJAAN","NILAI KONTRAK","PAGU ANGGARAN","PELAKSANA","PAKET"];
-  for (let r = 0; r < Math.min(raw.length, 15); r++) {
+  for (let r = 0; r < Math.min(raw.length, 20); r++) {
     const cells = raw[r].map((c) => norm(c));
     const hits = cells.filter((c) => KEYWORDS.some((k) => c === k || c.includes(k)));
     if (hits.length >= 2) return r;
   }
   return 0;
+};
+
+// Scan rows ABOVE the header row for an OPD banner like:
+//   "OPD : DINAS BINA MARGA, CIPTA KARYA DAN TATA RUANG"
+//   "PD : DINAS PENDIDIKAN"
+const scanBannerOpd = (rawRows, headerRowIdx) => {
+  for (let r = 0; r < Math.min(headerRowIdx, rawRows.length); r++) {
+    for (const cell of rawRows[r]) {
+      const s = String(cell ?? "").trim();
+      // Match "OPD : xxx" or "PD : xxx" or "INSTANSI : xxx"
+      const m = s.match(/^(?:OPD|PD|INSTANSI)\s*[:\-–]\s*(.+)/i);
+      if (m) return m[1].trim();
+    }
+  }
+  return null;
+};
+
+// OPD matching by word-overlap score (requires ≥2 matching significant words)
+const resolveOpdByScore = (rawName, opds) => {
+  if (!rawName) return null;
+  const candidateWords = norm(rawName).split(" ").filter((w) => w.length > 3);
+  let bestId = null;
+  let bestScore = 0;
+  for (const o of opds) {
+    const nameWords = norm(o.name).split(" ").filter((w) => w.length > 3);
+    const score = candidateWords.filter((w) => nameWords.includes(w)).length;
+    if (score > bestScore) {
+      bestScore = score;
+      bestId = o.id;
+    }
+  }
+  // require at least 2 overlapping meaningful words
+  return bestScore >= 2 ? bestId : null;
 };
 
 // Infer kategori from text content
@@ -71,12 +104,21 @@ const inferKategori = (text) => {
   return "KONSTRUKSI";
 };
 
-// Determine if a row is a section/group header rather than real data
-const isSectionHeader = (name) => {
-  if (!name) return true;
+// Determine if a row is a section/group header rather than real data.
+// Returns parsed section info or false.
+const parseSectionHeader = (name) => {
+  if (!name) return false;
   const n = String(name).trim();
-  if (n.startsWith(":")) return true;            // ": 1.03.03..."
-  if (/^\d+\.\d+\.\d+/.test(n)) return true;    // kode rekening as row header
+  // Rows starting with ":" are section headers: ": 1.03.03.2.01.0028 Nama Sub-Kegiatan"
+  if (n.startsWith(":")) {
+    const stripped = n.replace(/^[:\s]+/, "");
+    const m = stripped.match(/^([\d.]+)\s*(.*)/);
+    if (m) return { kodeRekening: m[1].trim(), kegiatan: m[2].trim() || stripped };
+    return { kodeRekening: null, kegiatan: stripped };
+  }
+  // Standalone kode rekening rows like "1.03.03.2.01.0028 Nama"
+  const m2 = n.match(/^(\d+\.\d+\.\d+[\d.]*)\s+(.*)/);
+  if (m2) return { kodeRekening: m2[1].trim(), kegiatan: m2[2].trim() };
   return false;
 };
 
@@ -93,8 +135,39 @@ export const importFromBuffer = async (buffer, actorId, defaults = {}) => {
   const wb = XLSX.read(buffer, { type: "buffer" });
   const ws = wb.Sheets[wb.SheetNames[0]];
 
-  // 1. Auto-detect header row
+  // 1. Read all raw rows for banner scanning + header detection
+  const rawAll = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+
+  // 2. Auto-detect header row
   const headerRowIdx = detectHeaderRow(ws);
+
+  // 3. Scan banner rows ABOVE the header for "OPD : <name>"
+  const bannerOpdName = scanBannerOpd(rawAll, headerRowIdx);
+
+  // 4. Load all OPDs from DB
+  const opds = await prisma.opd.findMany({ select: { id: true, code: true, name: true } });
+  const opdByCode = {};
+  opds.forEach((o) => { opdByCode[norm(o.code)] = o.id; });
+
+  // Resolve OPD: exact code match → word-score match → defaults.opdId
+  const resolveOpd = (rawValue) => {
+    if (rawValue) {
+      const n = norm(rawValue);
+      if (opdByCode[n]) return opdByCode[n];
+      const byScore = resolveOpdByScore(rawValue, opds);
+      if (byScore) return byScore;
+    }
+    return null;
+  };
+
+  // Determine sheet-level default OPD:
+  //   1. banner row from Excel  2. default from form
+  const sheetOpdId =
+    (bannerOpdName ? resolveOpd(bannerOpdName) : null) ||
+    defaults.opdId ||
+    null;
+
+  // 5. Parse data rows
   const rows = XLSX.utils.sheet_to_json(ws, { range: headerRowIdx, defval: "" });
 
   if (rows.length === 0) {
@@ -103,7 +176,7 @@ export const importFromBuffer = async (buffer, actorId, defaults = {}) => {
     throw err;
   }
 
-  // 2. Build flexible column mapping from actual headers
+  // 6. Build flexible column mapping from actual headers
   const colMap = buildHeaderMap(rows[0]);
 
   const get = (row, key) => {
@@ -111,28 +184,7 @@ export const importFromBuffer = async (buffer, actorId, defaults = {}) => {
     return header !== undefined ? row[header] : "";
   };
 
-  // 3. OPD lookup: by code and by name (fuzzy)
-  const opds = await prisma.opd.findMany({ select: { id: true, code: true, name: true } });
-  const opdByCode = {};
-  const opdByName = {};
-  opds.forEach((o) => {
-    opdByCode[norm(o.code)] = o.id;
-    norm(o.name).split(" ").filter((w) => w.length > 3).forEach((w) => {
-      if (!opdByName[w]) opdByName[w] = o.id;
-    });
-  });
-
-  const resolveOpd = (rawCode) => {
-    if (!rawCode) return defaults.opdId || null;
-    const n = norm(rawCode);
-    if (opdByCode[n]) return opdByCode[n];
-    for (const w of n.split(" ").filter((w) => w.length > 3)) {
-      if (opdByName[w]) return opdByName[w];
-    }
-    return defaults.opdId || null;
-  };
-
-  // 4. Auto-increment code
+  // 7. Auto-increment code
   const latestPaket = await prisma.paket.findFirst({
     orderBy: { createdAt: "desc" },
     select: { code: true },
@@ -154,6 +206,9 @@ export const importFromBuffer = async (buffer, actorId, defaults = {}) => {
 
   const results = { success: 0, failed: 0, errors: [] };
 
+  // Track current section header for grouping
+  let currentSection = { kodeRekening: null, kegiatan: null };
+
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const rowNum = headerRowIdx + i + 2;
@@ -169,12 +224,18 @@ export const importFromBuffer = async (buffer, actorId, defaults = {}) => {
         rawName = fallbackKey ? String(row[fallbackKey] || "").trim() : "";
       }
 
+      // Check if this is a section header row → update context, don't import
+      const section = parseSectionHeader(rawName);
+      if (section) {
+        currentSection = section;
+        continue;
+      }
+
+      // Skip fully blank rows
+      if (!rawName) continue;
+
       const pagu = parseFloat(String(get(row, "pagu") || 0).replace(/,/g, "")) || 0;
       const nilai = parseFloat(String(get(row, "nilai") || 0).replace(/,/g, "")) || 0;
-
-      // Skip section headers and blank rows
-      if (isSectionHeader(rawName)) continue;
-      if (!rawName) continue;
 
       const name = rawName;
       const nilaiRealisasi = parseFloat(String(get(row, "nilaiRealisasi") || 0).replace(/,/g, "")) || 0;
@@ -186,14 +247,19 @@ export const importFromBuffer = async (buffer, actorId, defaults = {}) => {
       const progres = parseFloat(String(get(row, "progres") || 0).replace(/,/g, "")) || 0;
       const nomorKontrak = String(get(row, "nomorKontrak") || "").trim() || null;
       const noSPMK = String(get(row, "noSPMK") || "").trim() || null;
-      const kegiatan = String(get(row, "kegiatan") || "").trim() || name;
-      const kodeRekening = String(get(row, "kodeRekening") || "").trim() || null;
       const tanggalMulaiRaw = get(row, "tanggalMulai");
       const tanggalSelesaiRaw = get(row, "tanggalSelesai");
 
-      // OPD
+      // Inherit section header's kode rekening and kegiatan for this row
+      const kegiatan =
+        String(get(row, "kegiatan") || "").trim() || currentSection.kegiatan || name;
+      const kodeRekening =
+        String(get(row, "kodeRekening") || "").trim() || currentSection.kodeRekening || null;
+
+      // OPD: per-row column → sheet banner → form default
       const rawOpdCode = String(get(row, "opdCode") || "").trim();
-      const resolvedOpdId = resolveOpd(rawOpdCode);
+      const resolvedOpdId =
+        (rawOpdCode ? resolveOpd(rawOpdCode) : null) || sheetOpdId;
       if (!resolvedOpdId) {
         results.errors.push(`Baris ${rowNum}: OPD tidak ditemukan — pilih OPD default di form`);
         results.failed++;
