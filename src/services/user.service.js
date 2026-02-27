@@ -87,6 +87,8 @@ export const deleteUser = async (id, actorId) => {
     err.statusCode = 400;
     throw err;
   }
+  // Hapus relasi AuditLog terlebih dahulu agar tidak terjadi FK constraint error
+  await prisma.auditLog.deleteMany({ where: { userId: id } });
   await prisma.user.delete({ where: { id } });
 };
 
