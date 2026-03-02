@@ -32,12 +32,12 @@ export const getUserById = async (id) => {
 };
 
 export const createUser = async (
-  { email, password, name, role, opdId },
+  { email, password, name, role, opdId, isActive = true },
   actorId,
 ) => {
   const hashed = await bcrypt.hash(password, 10);
   const user = await prisma.user.create({
-    data: { email, password: hashed, name, role, opdId: opdId || null },
+    data: { email, password: hashed, name, role, opdId: opdId || null, isActive },
     include: { opd: true },
   });
 
