@@ -136,6 +136,30 @@ const VALID_MAP = {
   JASA_LAINNYA: "JASA_LAINNYA", "JASA LAINNYA": "JASA_LAINNYA", JASA: "JASA_LAINNYA",
 };
 
+// Parse number from Excel cell — handles:
+//   · Already-numeric JS values (xlsx reads cells as number natively) → use as-is
+//   · Indonesian format  : "258.827.766.600,00"  (dot=thousands, comma=decimal)
+//   · US/default format  : "258,827,766,600.00"  (comma=thousands, dot=decimal)
+const parseNum = (raw) => {
+  if (raw === null || raw === undefined || raw === "") return 0;
+  // xlsx already gave us a real JS number — use it directly
+  if (typeof raw === "number") return raw;
+  const s = String(raw).trim();
+  if (!s) return 0;
+  // Detect format: find last dot and last comma positions
+  const lastDot   = s.lastIndexOf(".");
+  const lastComma = s.lastIndexOf(",");
+  let normalized;
+  if (lastComma > lastDot) {
+    // Comma is decimal separator → Indonesian/European format: 1.234.567,89
+    normalized = s.replace(/\./g, "").replace(",", ".");
+  } else {
+    // Dot is decimal separator (or no separator) → remove commas: 1,234,567.89
+    normalized = s.replace(/,/g, "");
+  }
+  return parseFloat(normalized) || 0;
+};
+
 // ─── main export ─────────────────────────────────────────────────────────────
 
 export const importFromBuffer = async (buffer, actorId, defaults = {}) => {
@@ -244,17 +268,17 @@ export const importFromBuffer = async (buffer, actorId, defaults = {}) => {
       // Skip fully blank rows
       if (!rawName) continue;
 
-      const pagu = parseFloat(String(get(row, "pagu") || 0).replace(/,/g, "")) || 0;
-      const nilai = parseFloat(String(get(row, "nilai") || 0).replace(/,/g, "")) || 0;
+      const pagu = parseNum(get(row, "pagu"));
+      const nilai = parseNum(get(row, "nilai"));
 
       const name = rawName;
-      const nilaiRealisasi = parseFloat(String(get(row, "nilaiRealisasi") || 0).replace(/,/g, "")) || 0;
+      const nilaiRealisasi = parseNum(get(row, "nilaiRealisasi"));
       const pelaksana = String(get(row, "pelaksana") || "").trim() || null;
       const lokasi = String(get(row, "lokasi") || "").trim();
       const keterangan = String(get(row, "keterangan") || "").trim() || null;
       const sumberDana = String(get(row, "sumberDana") || defaults.sumberDana || "APBD").trim();
       const tahun = parseInt(get(row, "tahun")) || parseInt(defaults.tahun) || new Date().getFullYear();
-      const progres = parseFloat(String(get(row, "progres") || 0).replace(/,/g, "")) || 0;
+      const progres = parseNum(get(row, "progres"));
       const nomorKontrak = String(get(row, "nomorKontrak") || "").trim() || null;
       const noSPMK = String(get(row, "noSPMK") || "").trim() || null;
       const tanggalMulaiRaw = get(row, "tanggalMulai");
@@ -292,7 +316,6 @@ export const importFromBuffer = async (buffer, actorId, defaults = {}) => {
         nomorKontrak, noSPMK,
         tanggalMulai: parseDate(tanggalMulaiRaw),
         tanggalSelesai: parseDate(tanggalSelesaiRaw),
-        status: "ACTIVE",
       };
 
       await prisma.paket.upsert({
