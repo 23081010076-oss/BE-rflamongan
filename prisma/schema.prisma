@@ -67,7 +67,7 @@ model Paket {
   nilaiRealisasi Float       @default(0) @map("nilai_realisasi")
   progres     Float          @default(0) // dalam persen
   tahun       Int
-  status      StatusPaket    @default(PENDING)
+  status      StatusPaket    @default(ACTIVE)
   tanggalMulai DateTime?     @map("tanggal_mulai")
   tanggalSelesai DateTime?   @map("tanggal_selesai")
   keterangan  String?

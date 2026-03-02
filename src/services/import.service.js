@@ -292,6 +292,7 @@ export const importFromBuffer = async (buffer, actorId, defaults = {}) => {
         nomorKontrak, noSPMK,
         tanggalMulai: parseDate(tanggalMulaiRaw),
         tanggalSelesai: parseDate(tanggalSelesaiRaw),
+        status: "ACTIVE",
       };
 
       await prisma.paket.upsert({
